@@ -25,6 +25,8 @@ jobs:
       - name: Run bus reminder agent
         env:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_CALENDAR_CREDENTIALS: ${{ secrets.GOOGLE_CALENDAR_CREDENTIALS }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
           HOME_ADDRESS: "110 Saunders Park View, Brighton BN2 4NY, UK"
           SCHOOL_ADDRESS: "Bevendean Primary School, Brighton, UK"
           PREFERRED_BUS_ROUTE: "48"
