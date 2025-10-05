@@ -1,0 +1,54 @@
+graph TB
+    subgraph "☁️ GitHub Actions (Free Cloud)"
+        A[Scheduled Trigger<br/>7:50 AM Mon-Fri]
+        B[Run Python Script]
+    end
+    
+    subgraph "🐍 Bus Reminder Agent"
+        C[Get Current Time]
+        D[Query Google Maps API]
+        E[Parse Transit Routes]
+        F{Bus 48 Found?}
+        G[Filter by Criteria<br/>After 8:20, Arrives by 8:45]
+        H{Suitable Bus?}
+        I[Select Best Bus]
+        J[Calculate Reminder Time<br/>12 mins before]
+        K[Create Calendar Event<br/>.ics file]
+        L[Create Alert Event]
+    end
+    
+    subgraph "🗺️ Google Maps API"
+        M[Directions API<br/>Transit Mode]
+        N[Real-time Bus Data<br/>Brighton & Hove Buses]
+    end
+    
+    subgraph "📱 User's iPhone"
+        O[Download .ics File]
+        P[Import to Calendar]
+        Q[Receive Notification<br/>12 mins before bus]
+    end
+    
+    A -->|Cron: 50 6 * * 1-5| B
+    B --> C
+    C --> D
+    D -->|Home → School<br/>Transit Mode| M
+    M -->|JSON Response| N
+    N -->|Routes with Bus 48| E
+    E --> F
+    F -->|Yes| G
+    F -->|No| L
+    G --> H
+    H -->|Yes| I
+    H -->|No| L
+    I --> J
+    J --> K
+    K -->|Upload Artifact| O
+    L -->|Upload Artifact| O
+    O --> P
+    P --> Q
+    
+    style A fill:#e1f5ff
+    style M fill:#fff4e1
+    style Q fill:#e1ffe1
+    style K fill:#ffe1f5
+    style L fill:#ffe1e1
