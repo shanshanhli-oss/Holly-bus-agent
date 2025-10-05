@@ -1,0 +1,43 @@
+name: Bus Reminder Agent
+
+on:
+  schedule:
+    - cron: '50 6 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  check-bus-times:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run bus reminder agent
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          HOME_ADDRESS: "110 Saunders Park View, Brighton BN2 4NY, UK"
+          SCHOOL_ADDRESS: "Bevendean Primary School, Brighton, UK"
+          PREFERRED_BUS_ROUTE: "48"
+          MIN_DEPARTURE_TIME: "08:20"
+          MAX_ARRIVAL_TIME: "08:45"
+          REMINDER_MINUTES_BEFORE: "12"
+        run: |
+          python bus_reminder.py
+      
+      - name: Upload calendar file
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bus-reminder-calendar
+          path: '*.ics'
+          retention-days: 1
