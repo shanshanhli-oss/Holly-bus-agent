@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Bus Reminder Agent
-Checks Bus 48 times and creates Google Calendar reminders
+Bus Reminder Agent with Google Calendar Integration
+Checks Bus 48 times and creates Google Calendar reminders directly
 """
 
 import os
@@ -11,9 +11,13 @@ import requests
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import pytz
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 # Configuration from environment variables
 GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', '')
+GOOGLE_CALENDAR_CREDENTIALS = os.getenv('GOOGLE_CALENDAR_CREDENTIALS', '')
+GOOGLE_CALENDAR_ID = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
 HOME_ADDRESS = os.getenv('HOME_ADDRESS', '110 Saunders Park View, Brighton BN2 4NY, UK')
 SCHOOL_ADDRESS = os.getenv('SCHOOL_ADDRESS', 'Bevendean Primary School, Brighton, UK')
 PREFERRED_BUS_ROUTE = os.getenv('PREFERRED_BUS_ROUTE', '48')
@@ -30,8 +34,24 @@ class BusReminderAgent:
     
     def __init__(self):
         self.api_key = GOOGLE_MAPS_API_KEY
+        self.calendar_service = None
+        self.calendar_id = GOOGLE_CALENDAR_ID
+        
         if not self.api_key:
-            print("⚠️  WARNING: GOOGLE_MAPS_API_KEY not set. Using demo mode.")
+            print("⚠️  WARNING: GOOGLE_MAPS_API_KEY not set.")
+        
+        # Initialize Google Calendar API
+        if GOOGLE_CALENDAR_CREDENTIALS:
+            try:
+                credentials_dict = json.loads(GOOGLE_CALENDAR_CREDENTIALS)
+                credentials = service_account.Credentials.from_service_account_info(
+                    credentials_dict,
+                    scopes=['https://www.googleapis.com/auth/calendar']
+                 )
+                self.calendar_service = build('calendar', 'v3', credentials=credentials)
+                print("✅ Google Calendar API initialized")
+            except Exception as e:
+                print(f"⚠️  Warning: Could not initialize Google Calendar API: {e}")
         
     def get_transit_directions(self) -> Optional[Dict]:
         """
@@ -44,7 +64,7 @@ class BusReminderAgent:
         url = "https://maps.googleapis.com/maps/api/directions/json"
         
         # Get current time in UK timezone
-        now = datetime.now(UK_TZ)
+        now = datetime.now(UK_TZ )
         
         params = {
             'origin': HOME_ADDRESS,
@@ -169,13 +189,16 @@ class BusReminderAgent:
         
         return reminder_time
     
-    def create_calendar_reminder(self, bus_info: Dict, reminder_time: datetime) -> bool:
+    def create_google_calendar_event(self, bus_info: Dict, reminder_time: datetime) -> bool:
         """
         Create a Google Calendar event with reminder
-        For now, this outputs the event details that need to be created
         """
+        if not self.calendar_service:
+            print("❌ Google Calendar API not initialized")
+            return False
+        
         print("\n" + "="*60)
-        print("📅 CALENDAR REMINDER TO CREATE")
+        print("📅 CREATING GOOGLE CALENDAR EVENT")
         print("="*60)
         
         event_title = f"🚌 Bus {bus_info['route']} to School"
@@ -188,62 +211,46 @@ class BusReminderAgent:
             f"⏰ Leave now to catch the bus!"
         )
         
-        print(f"Title: {event_title}")
-        print(f"Start Time: {bus_info['departure_time'].strftime('%Y-%m-%d %H:%M %Z')}")
-        print(f"Reminder: {reminder_time.strftime('%Y-%m-%d %H:%M %Z')}")
-        print(f"Description:\n{event_description}")
-        print("="*60)
+        # Calculate minutes before for the reminder
+        minutes_before = int((bus_info['departure_time'] - reminder_time).total_seconds() / 60)
         
-        # In a full implementation, this would use Google Calendar API
-        # For now, we'll output the iCalendar format
-        return self.create_ics_file(event_title, event_description, bus_info['departure_time'], reminder_time)
-    
-    def create_ics_file(self, title: str, description: str, start_time: datetime, reminder_time: datetime) -> bool:
-        """
-        Create an iCalendar (.ics) file that can be imported to any calendar
-        """
+        # Create event
+        event = {
+            'summary': event_title,
+            'description': event_description,
+            'start': {
+                'dateTime': bus_info['departure_time'].isoformat(),
+                'timeZone': 'Europe/London',
+            },
+            'end': {
+                'dateTime': (bus_info['departure_time'] + timedelta(minutes=5)).isoformat(),
+                'timeZone': 'Europe/London',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': minutes_before},
+                ],
+            },
+        }
+        
         try:
-            # Calculate minutes before for the alarm
-            minutes_before = int((start_time - reminder_time).total_seconds() / 60)
+            created_event = self.calendar_service.events().insert(
+                calendarId=self.calendar_id,
+                body=event
+            ).execute()
             
-            # Escape description for ICS format
-            desc_escaped = description.replace('\n', '\\n')
-            
-            ics_content = f"""BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Bus Reminder Agent//EN
-CALSCALE:GREGORIAN
-METHOD:PUBLISH
-BEGIN:VEVENT
-UID:{start_time.strftime('%Y%m%d%H%M%S')}@bus-reminder-agent
-DTSTAMP:{datetime.now(UK_TZ).strftime('%Y%m%dT%H%M%SZ')}
-DTSTART:{start_time.strftime('%Y%m%dT%H%M%S')}
-DTEND:{(start_time + timedelta(minutes=5)).strftime('%Y%m%dT%H%M%S')}
-SUMMARY:{title}
-DESCRIPTION:{desc_escaped}
-STATUS:CONFIRMED
-SEQUENCE:0
-BEGIN:VALARM
-TRIGGER:-PT{minutes_before}M
-DESCRIPTION:Time to leave for the bus!
-ACTION:DISPLAY
-END:VALARM
-END:VEVENT
-END:VCALENDAR"""
-            
-            filename = f"bus_reminder_{start_time.strftime('%Y%m%d_%H%M')}.ics"
-            filepath = os.path.join('/home/ubuntu/bus-reminder-agent', filename)
-            
-            with open(filepath, 'w') as f:
-                f.write(ics_content)
-            
-            print(f"\n✅ Calendar file created: {filename}")
-            print(f"📧 You can email this file to yourself or import it directly to your calendar")
+            print(f"✅ Calendar event created successfully!")
+            print(f"Title: {event_title}")
+            print(f"Start Time: {bus_info['departure_time'].strftime('%Y-%m-%d %H:%M %Z')}")
+            print(f"Reminder: {minutes_before} minutes before ({reminder_time.strftime('%H:%M')})")
+            print(f"Event Link: {created_event.get('htmlLink', 'N/A')}")
+            print("="*60)
             
             return True
             
         except Exception as e:
-            print(f"❌ Error creating calendar file: {e}")
+            print(f"❌ Error creating calendar event: {e}")
             return False
     
     def send_alert(self, message: str):
@@ -256,11 +263,40 @@ END:VCALENDAR"""
         print(message)
         print("="*60)
         
+        if not self.calendar_service:
+            return
+        
         # Create an immediate calendar alert
         now = datetime.now(UK_TZ)
         alert_title = "⚠️ Bus Alert"
         
-        self.create_ics_file(alert_title, message, now + timedelta(minutes=1), now)
+        event = {
+            'summary': alert_title,
+            'description': message,
+            'start': {
+                'dateTime': (now + timedelta(minutes=1)).isoformat(),
+                'timeZone': 'Europe/London',
+            },
+            'end': {
+                'dateTime': (now + timedelta(minutes=2)).isoformat(),
+                'timeZone': 'Europe/London',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 0},
+                ],
+            },
+        }
+        
+        try:
+            self.calendar_service.events().insert(
+                calendarId=self.calendar_id,
+                body=event
+            ).execute()
+            print("✅ Alert added to Google Calendar")
+        except Exception as e:
+            print(f"⚠️  Could not add alert to calendar: {e}")
     
     def run(self):
         """
@@ -279,7 +315,7 @@ END:VCALENDAR"""
                 "❌ Unable to check bus times from Google Maps.\n"
                 "Please check the bus schedule manually at:\n"
                 "https://www.buses.co.uk/stops/149000007061"
-            )
+             )
             return False
         
         # Step 2: Parse bus routes
@@ -299,8 +335,8 @@ END:VCALENDAR"""
         # Step 4: Calculate reminder time
         reminder_time = self.calculate_reminder_time(best_bus['departure_time'])
         
-        # Step 5: Create calendar reminder
-        success = self.create_calendar_reminder(best_bus, reminder_time)
+        # Step 5: Create Google Calendar event
+        success = self.create_google_calendar_event(best_bus, reminder_time)
         
         if success:
             print("\n✅ Bus reminder agent completed successfully!")
